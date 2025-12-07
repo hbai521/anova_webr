@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>webR ANOVA demo</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      max-width: 900px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      line-height: 1.5;
+    }
+    textarea {
+      width: 100%;
+      font-family: monospace;
+    }
+    #output {
+      background: #111;
+      color: #eee;
+      padding: 1rem;
+      min-height: 150px;
+      white-space: pre-wrap;
+      overflow-x: auto;
+    }
+    #status {
+      margin-bottom: 1rem;
+      font-size: 0.95rem;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <h1>webR ANOVA demo</h1>
+
+  <div id="status">Loading webR…</div>
+
+  <p><strong>Step 1:</strong> Upload your CSV (two columns: <code>Data</code>, <code>treatment</code>).</p>
+  <p>Example first lines should look like:</p>
+  <pre>Data,treatment
+1.196,A
+1.096,B
+1.168,C
+0.757,D
+...</pre>
+
+  <input type="file" id="fileInput" accept=".csv">
+
+  <h3>Step 2: R code to run</h3>
+  <p>You can edit this. Click “Run R code” to execute.</p>
+
+  <textarea id="rcode" rows="12">
+# Basic workflow after upload:
+
+df <- read.csv("data.csv")
+str(df)
+
+# Make sure treatment is a factor
+df$treatment <- as.factor(df$treatment)
+
+# One-way ANOVA
+model <- aov(Data ~ treatment, data = df)
+summary(model)
+
+# Tukey post-hoc test
+TukeyHSD(model)
+  </textarea>
+  <br><br>
+  <button id="runBtn">Run R code</button>
+
+  <h3>Output</h3>
+  <pre id="output"></pre>
+
+  <script type="module">
+    import { WebR } from "https://webr.r-wasm.org/latest/webr.mjs";
+
+    const outputEl = document.getElementById('output');
+    const statusEl = document.getElementById('status');
+    const runBtn = document.getElementById('runBtn');
+    const fileInput = document.getElementById('fileInput');
+    const rCodeEl = document.getElementById('rcode');
+
+    async function main() {
+      try {
+        statusEl.textContent = "Initializing webR (this may take a few seconds)…";
+        const webR = new WebR();
+        await webR.init();
+        statusEl.textContent = "webR ready. 1) Upload CSV, 2) Click 'Run R code'.";
+
+        async function runR(code) {
+          try {
+            // Evaluate R code
+            const result = await webR.evalR(code);
+            const text = await result.toString();
+            outputEl.textContent = text;
+          } catch (err) {
+            console.error(err);
+            outputEl.textContent = "R error: " + err;
+          }
+        }
+
+        // Run code from textarea
+        runBtn.addEventListener('click', async () => {
+          const code = rCodeEl.value;
+          await runR(code);
+        });
+
+        // Load CSV into webR as "data.csv"
+        fileInput.addEventListener('change', async (e) => {
+          try {
+            const file = e.target.files[0];
+            if (!file) {
+              return;
+            }
+
+            const text = await file.text();
+            console.log("Uploaded file size:", file.size, "bytes");
+
+            // Write into webR virtual filesystem
+            await webR.FS.writeFile("data.csv", text);
+
+            // Quick diagnostic in R: see files + preview first lines
+            await runR(`
+cat("=== Files in working directory ===\\n")
+print(list.files())
+
+cat("\\n=== First 6 lines of data.csv ===\\n")
+print(readLines("data.csv", n = 6))
+            `);
+          } catch (err) {
+            console.error(err);
+            outputEl.textContent = "Upload error: " + err;
+          }
+        });
+
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "Failed to initialize webR: " + err;
+      }
+    }
+
+    main();
+  </script>
+</body>
+</html>
+
