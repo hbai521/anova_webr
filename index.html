@@ -2,16 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>webR ANOVA demo</title>
+  <title>webR R Runner (GitHub data.csv)</title>
   <style>
     body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      font-family: system-ui, sans-serif;
       max-width: 900px;
       margin: 2rem auto;
       padding: 0 1rem;
     }
     textarea {
       width: 100%;
+      height: 200px;
       font-family: monospace;
     }
     pre {
@@ -19,53 +20,49 @@
       color: #eee;
       padding: 1rem;
       min-height: 150px;
-      overflow-x: auto;
       white-space: pre-wrap;
+      overflow-x: auto;
+    }
+    #status {
+      margin-bottom: 1rem;
+      font-size: 0.9rem;
+      color: #555;
     }
   </style>
 </head>
 <body>
-  <h1>webR ANOVA demo</h1>
+  <h1>webR R Runner</h1>
+  <div id="status">Initializing…</div>
 
-  <div id="status">Loading webR…</div>
+  <h2>Step 1: Type your R code</h2>
+  <p><small>
+    Note: This page will automatically load <code>data.csv</code> from the same folder as this HTML file.<br>
+    In R, you can just do: <code>df &lt;- read.csv("data.csv")</code>
+  </small></p>
 
-  <h3>Upload your CSV (two columns: Data,treatment)</h3>
-  <input type="file" id="fileInput" accept=".csv">
-
-  <h3>R Code to Run</h3>
-  <textarea id="rcode" rows="12">
-df <- read.csv("data.csv")
-str(df)
-
-df$treatment <- as.factor(df$treatment)
-
-model <- aov(Data ~ treatment, data = df)
-summary(model)
-TukeyHSD(model)
-  </textarea>
-
+  <textarea id="rcode" placeholder="Type R code here..."></textarea>
   <br><br>
   <button id="runBtn">Run R code</button>
 
-  <h3>Output</h3>
+  <h2>Output</h2>
   <pre id="output"></pre>
 
   <script type="module">
     import { WebR } from "https://webr.r-wasm.org/latest/webr.mjs";
 
     const outputEl = document.getElementById('output');
-    const statusEl = document.getElementById('status');
     const runBtn = document.getElementById('runBtn');
-    const fileInput = document.getElementById('fileInput');
     const rCodeEl = document.getElementById('rcode');
+    const statusEl = document.getElementById('status');
 
     async function main() {
       try {
-        statusEl.textContent = "Initializing webR (this may take a few seconds)…";
+        statusEl.textContent = "Starting webR (may take a few seconds)…";
         const webR = new WebR();
         await webR.init();
-        statusEl.textContent = "webR ready. 1) Upload CSV, 2) Run R code";
+        statusEl.textContent = "webR ready. Trying to load data.csv from server…";
 
+        // Helper to run R code and print output
         async function runR(code) {
           try {
             const result = await webR.evalR(code);
@@ -76,41 +73,41 @@ TukeyHSD(model)
           }
         }
 
+        // Try to fetch data.csv from the same directory as index.html
+        try {
+          const resp = await fetch("data.csv");
+          if (!resp.ok) {
+            statusEl.textContent = "webR ready. data.csv NOT found on server.";
+          } else {
+            let text = await resp.text();
+
+            // Clean BOM and leading blank line, just in case
+            text = text.replace(/^\uFEFF/, "");
+            text = text.replace(/^\s*(\r\n|\n)/, "");
+
+            await webR.FS.writeFile("data.csv", text);
+
+            // Optional: quick check in R
+            await runR(`
+cat("data.csv loaded successfully into webR\\n")
+cat("First lines of data.csv as seen by R:\\n")
+print(readLines("data.csv", n = 5))
+            `);
+
+            statusEl.textContent = "webR ready. data.csv loaded from server.";
+          }
+        } catch (e) {
+          statusEl.textContent = "webR ready. Could not fetch data.csv.";
+        }
+
+        // Run arbitrary R code from the textarea
         runBtn.addEventListener('click', async () => {
           const code = rCodeEl.value;
           await runR(code);
         });
 
-        fileInput.addEventListener('change', async (e) => {
-          try {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            let text = await file.text();
-
-            // ⭐⭐⭐⭐⭐ CRITICAL FIX ⭐⭐⭐⭐⭐
-            // remove BOM if present
-            text = text.replace(/^\uFEFF/, "");
-            // remove one or more leading blank lines
-            text = text.replace(/^\s*(\r\n|\n)/, "");
-
-            await webR.FS.writeFile("data.csv", text);
-
-            // Diagnostics: verify correct load
-            await runR(`
-cat("=== Files in working dir ===\\n")
-print(list.files())
-
-cat("\\n=== First 8 lines of data.csv ===\\n")
-print(readLines("data.csv", n = 8))
-            `);
-
-          } catch (err) {
-            outputEl.textContent = "Upload error: " + err;
-          }
-        });
       } catch (err) {
-        statusEl.textContent = "webR init failed: " + err;
+        statusEl.textContent = "Failed to initialize webR: " + err;
       }
     }
 
